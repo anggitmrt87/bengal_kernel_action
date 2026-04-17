@@ -4,7 +4,7 @@ on:
     inputs:
       REPO:
         description: 'Kernel repository'
-        default: 'rsuntk-asus-sdm660/android_kernel_asus_sdm660'
+        default: 'anggitmrt87/kernel_xiaomi_citrus_sm6115'
         required: true
       USE_PRIVATE_REPO:
         description: 'Use Private Repository'
@@ -12,13 +12,13 @@ on:
         default: false
       BRANCH:
         description: 'Kernel branch'
-        default: 'lineage-23.2'
+        default: '13.0.0-perf'
         required: true
       DEVICE_TARGET:
         description: 'Device to build'
-        default: 'X01BD'
+        default: 'bengal-perf'
         type: choice
-        options: [X01BD, X00TD]
+        options: [bengal-perf, bengal-stock]
       KSU:
         description: 'Add KernelSU support'
         type: boolean
@@ -30,7 +30,7 @@ on:
       APPLY_WORKAROUND:
         description: 'Disable Thermal Configs'
         type: boolean
-        default: true
+        default: false
       BUILD_RELEASE:
         description: 'Build non-nightly'
         type: boolean
@@ -90,7 +90,7 @@ jobs:
         CODENAME=$(cat ../codename)
 
         if [[ "${{ inputs.BUILD_RELEASE }}" = "false" ]]; then
-          [ -d $(pwd)/localversion ] && sed -i "s/-Perlica/-Perlica-Nightly@$gitsha1/g" $(pwd)/localversion
+          #[ -d $(pwd)/localversion ] && sed -i "s/-Perlica/-Perlica-Nightly@$gitsha1/g" $(pwd)/localversion
           echo "buildDetails=$CODENAME-${{ github.event.inputs.DEVICE_TARGET }}-$(date +%Y%m%d)_$(echo $gitsha1)-NIGHTLY" >> $GITHUB_OUTPUT
         else
           echo "buildDetails=$CODENAME-${{ github.event.inputs.DEVICE_TARGET }}-$(date +%Y%m%d)_$(echo $gitsha1)" >> $GITHUB_OUTPUT

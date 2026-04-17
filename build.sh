@@ -5,9 +5,9 @@ set -e
 
 # --- Configuration ---
 SECONDS=0
-USER="rsuntk"
+USER="anggit86"
 HOSTNAME="github"
-DEVICE_TARGET=${DEVICE_TARGET:-"X01BD"}
+DEVICE_TARGET=${DEVICE_TARGET:-"bengal-perf"}
 TC_DIR="$HOME/clang-22"
 OUT_DIR="$(pwd)/out"
 COMP_LOG="$OUT_DIR/compilation.log"
@@ -166,13 +166,13 @@ else
 fi
 
 [ "$KCFLAGS_W" = "true" ] && export KCFLAGS=-w
-DEFCONFIG="vendor/asus/${DEVICE_TARGET}_defconfig"
+DEFCONFIG="vendor/${DEVICE_TARGET}_defconfig"
 
 # --- Apply Config Patches ---
 [ "$APPLY_WORKAROUND" = "true" ] && disable_thermal_configs "$DEFCONFIG"
 
 COMMIT_HASH=$(git rev-parse --short HEAD 2>/dev/null || echo "untracked")
-[ -z "$CI_ZIPNAME" ] && ZIPNAME="rsuntk_$DEVICE_TARGET-$(date '+%Y%m%d-%H%M')-$COMMIT_HASH.zip" || ZIPNAME=$CI_ZIPNAME
+[ -z "$CI_ZIPNAME" ] && ZIPNAME="$DEVICE_TARGET-$(date '+%Y%m%d-%H%M')-$COMMIT_HASH.zip" || ZIPNAME=$CI_ZIPNAME
 BUILD_FLAGS="O=$OUT_DIR ARCH=arm64 -j$(nproc --all)"
 
 # --- Build Process ---
@@ -190,8 +190,10 @@ make $BUILD_FLAGS | tee -a $COMP_LOG
 if [ -f "$OUT_DIR/arch/arm64/boot/Image.gz-dtb" ]; then
     msg "Kernel compiled successfully! Packaging..."
     rm -rf AnyKernel3
-    git clone -q https://github.com/rsuntk/AnyKernel3 --single-branch -b "$DEVICE_TARGET"
-    cp "$OUT_DIR/arch/arm64/boot/Image.gz-dtb" AnyKernel3/
+    git clone -q https://github.com/anggitmrt87/AnyKernel3.git --single-branch -b "master"
+    cp "$OUT_DIR/arch/arm64/boot/Image.gz" AnyKernel3/
+    cp "$OUT_DIR/arch/arm64/boot/dts/vendor/qcom/bengal.dtb" AnyKernel3/dtb
+    cp "$OUT_DIR/arch/arm64/boot/dtbo.img" AnyKernel3/
 
     cd AnyKernel3
     zip -r9 "../$ZIPNAME" * -x '.git*' README.md '*placeholder'
