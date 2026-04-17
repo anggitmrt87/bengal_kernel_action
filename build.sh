@@ -187,7 +187,7 @@ make $BUILD_FLAGS $DEFCONFIG
 make $BUILD_FLAGS | tee -a $COMP_LOG
 
 # --- Packaging & Upload ---
-if [ -f "$OUT_DIR/arch/arm64/boot/Image.gz-dtb" ]; then
+if [ -f "$OUT_DIR/arch/arm64/boot/Image.gz" ]; then
     msg "Kernel compiled successfully! Packaging..."
     rm -rf AnyKernel3
     git clone -q https://github.com/anggitmrt87/AnyKernel3.git --single-branch -b "master"

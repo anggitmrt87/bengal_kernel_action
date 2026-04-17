@@ -147,5 +147,5 @@ jobs:
       with:
         name: Kernel-${{ steps.buildKernel.outputs.buildDetails }}
         path: |
-          kernel_root/out/arch/arm64/boot/Image.gz-dtb
+          kernel_root/out/arch/arm64/boot/Image.gz
           kernel_root/out/.config
