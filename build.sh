@@ -172,27 +172,24 @@ FRAGMENTS=()
 
 case "$DEVICE_TARGET" in
     chime)
-        msg "Device: chime - using chime.config"
-        FRAGMENTS+=("vendor/xiaomi/chime.config")
+        FRAGMENTS+=("arch/arm64/configs/vendor/xiaomi/chime.config")
         ;;
     lime)
-        msg "Device: lime - using chime.config + lime.config"
-        FRAGMENTS+=("vendor/xiaomi/chime.config")
-        FRAGMENTS+=("vendor/xiaomi/lime.config")
+        FRAGMENTS+=("arch/arm64/configs/vendor/xiaomi/chime.config")
+        FRAGMENTS+=("arch/arm64/configs/vendor/xiaomi/lime.config")
         ;;
     citrus)
-        msg "Device: citrus - using chime.config + citrus.config"
-        FRAGMENTS+=("vendor/xiaomi/chime.config")
-        FRAGMENTS+=("vendor/xiaomi/citrus.config")
+        FRAGMENTS+=("arch/arm64/configs/vendor/xiaomi/chime.config")
+        FRAGMENTS+=("arch/arm64/configs/vendor/xiaomi/citrus.config")
         ;;
 esac
 
 if [[ "$KSU" == "true" ]]; then
-    if [[ -f "vendor/kernelsu.config" ]]; then
-        msg "KernelSU enabled: adding vendor/kernelsu.config"
-        FRAGMENTS+=("vendor/kernelsu.config")
+    if [[ -f "arch/arm64/configs/vendor/kernelsu.config" ]]; then
+        msg "KernelSU enable"
+        FRAGMENTS+=("arch/arm64/configs/vendor/kernelsu.config")
     else
-        msg "WARNING: vendor/kernelsu.config not found, KernelSU fragment skipped."
+        msg "WARNING: kernelsu.config not found, KernelSU fragment skipped."
     fi
 fi
 
