@@ -1,19 +1,16 @@
 #!/usr/bin/env bash
 
-# Exit immediately if a command exits with a non-zero status
 set -e
 
-# --- Configuration ---
 SECONDS=0
 USER="anggit86"
 HOSTNAME="github"
-DEVICE_TARGET=${DEVICE_TARGET:-"bengal-perf"}
+DEVICE_TARGET=${DEVICE_TARGET:-"chime"}
 TC_DIR="$HOME/clang-22"
 OUT_DIR="$(pwd)/out"
 COMP_LOG="$OUT_DIR/compilation.log"
 KCFLAGS_W=${KCFLAGS_W:-"false"}
 
-# Colors for output
 export TERM=xterm
 red='\033[0;31m'
 green='\033[0;32m'
@@ -26,7 +23,6 @@ error() {
     exit 1
 }
 
-# --- Telegram Function ---
 send_telegram() {
     local file="$1"
     local md5="$2"
@@ -45,7 +41,6 @@ send_telegram() {
 
     CC_VERSION=$($CC -v 2>&1 | grep ' version ' | sed 's/[[:space:]]*$//')
 
-    # HTML formatted message
     local msg_bar="build $status in ${h}h ${m}m ${s}s
 Device: <code>${DEVICE_TARGET}</code>
 Compiler: $CC_VERSION
@@ -61,27 +56,34 @@ md5: <code>${md5}</code>"
     msg "Upload completed!"
 }
 
-# --- Config Manipulation ---
-disable_thermal_configs() {
-    local defconfig_path="arch/arm64/configs/$1"
-    msg "Applying thermal config patches to $1..."
+merge_kernel_configs() {
+    local base_defconfig="$1"
+    local merged_config="$OUT_DIR/.config"
+    local fragment_list=("${@:2}")
 
-    # List of configs to disable
-    local configs=(
-        CONFIG_QCOM_SPMI_TEMP_ALARM
-        CONFIG_QTI_ADC_TM
-        CONFIG_QTI_VIRTUAL_SENSOR
-    )
+    mkdir -p "$OUT_DIR"
 
-    for cfg in "${configs[@]}"; do
-        # Use sed to replace 'CONFIG_X=y' or 'CONFIG_X=m' with '# CONFIG_X is not set'
-        sed -i "s/$cfg=y/# $cfg is not set/g" "$defconfig_path"
-        sed -i "s/$cfg=m/# $cfg is not set/g" "$defconfig_path"
-    done
-    msg "Thermal configs disabled successfully."
+    if [[ ${#fragment_list[@]} -eq 0 ]]; then
+        msg "No extra fragments, copying base defconfig directly."
+        cp "arch/arm64/configs/$base_defconfig" "$merged_config"
+        return
+    fi
+
+    if [[ ! -x "scripts/kconfig/merge_config.sh" ]]; then
+        error "merge_config.sh not found or not executable. Make sure you are in kernel root."
+    fi
+
+    msg "Merging defconfig with fragments: ${fragment_list[*]}"
+    scripts/kconfig/merge_config.sh -m -O "$OUT_DIR" \
+        "arch/arm64/configs/$base_defconfig" \
+        "${fragment_list[@]}"
+
+    if [[ ! -f "$merged_config" ]]; then
+        error "Merged config not created!"
+    fi
+    msg "Merged config written to $merged_config"
 }
 
-# --- Dependencies Setup ---
 setup_deps() {
     local deps_lists=(aptitude bc bison ccache cpio curl flex git lz4 perl python-is-python3 tar wget)
     sudo apt update -y
@@ -89,10 +91,8 @@ setup_deps() {
     sudo aptitude install libssl-dev -y
 }
 
-# --- Toolchain Setup ---
 _setup_toolchain() {
     msg "Downloading AOSP-LLVM 22.0.1..."
-    #wget -q https://www.kernel.org/pub/tools/crosstool/files/bin/x86_64/15.2.0/x86_64-gcc-15.2.0-nolibc-aarch64-linux.tar.gz -O /tmp/gcc.tar.gz
     wget -q https://android.googlesource.com/platform/prebuilts/clang/host/linux-x86/+archive/9b144befdfd93b90e02c663504fb9f4b95f9faf8/clang-r596125.tar.gz -O /tmp/clang.tar.gz
     [ ! -d "$TC_DIR" ] && mkdir -p "$TC_DIR"
     tar -xzf /tmp/clang.tar.gz -C "$TC_DIR"
@@ -117,19 +117,15 @@ setup_toolchain() {
     exit 0
 }
 
-# --- Regenerate savedefconfig ---
 regen_defconfig() {
     [ -z "$DEVICE_TARGET" ] && error "DEVICE_TARGET is required to regen!"
     mkdir -p "$OUT_DIR"
     msg "Generating minimal defconfig for $DEVICE_TARGET..."
-
     make $BUILD_FLAGS "$DEFCONFIG"
     make $BUILD_FLAGS savedefconfig
-
     msg "Done!"
 }
 
-# --- Arguments Check ---
 case "$1" in
 "--setup-deps")
     setup_deps
@@ -147,9 +143,11 @@ case "$1" in
     ;;
 esac
 
-[ -z "$DEVICE_TARGET" ] && error "DEVICE_TARGET cannot be empty!"
+VALID_DEVICES=("chime" "lime" "citrus")
+if [[ ! " ${VALID_DEVICES[@]} " =~ " ${DEVICE_TARGET} " ]]; then
+    error "Invalid DEVICE_TARGET='$DEVICE_TARGET'. Valid: chime, lime, citrus"
+fi
 
-# --- Build Environment ---
 export KBUILD_BUILD_USER=$USER
 export KBUILD_BUILD_HOST=$HOSTNAME
 export PATH="$TC_DIR/bin:$PATH"
@@ -166,16 +164,54 @@ else
 fi
 
 [ "$KCFLAGS_W" = "true" ] && export KCFLAGS=-w
-DEFCONFIG="vendor/${DEVICE_TARGET}_defconfig"
 
-# --- Apply Config Patches ---
-[ "$APPLY_WORKAROUND" = "true" ] && disable_thermal_configs "$DEFCONFIG"
+BASE_DEFCONFIG="vendor/bengal-perf_defconfig"
+DEFCONFIG="$BASE_DEFCONFIG"
+
+FRAGMENTS=()
+
+case "$DEVICE_TARGET" in
+    chime)
+        msg "Device: chime - using chime.config"
+        FRAGMENTS+=("vendor/xiaomi/chime.config")
+        ;;
+    lime)
+        msg "Device: lime - using chime.config + lime.config"
+        FRAGMENTS+=("vendor/xiaomi/chime.config")
+        FRAGMENTS+=("vendor/xiaomi/lime.config")
+        ;;
+    citrus)
+        msg "Device: citrus - using chime.config + citrus.config"
+        FRAGMENTS+=("vendor/xiaomi/chime.config")
+        FRAGMENTS+=("vendor/xiaomi/citrus.config")
+        ;;
+esac
+
+if [[ "$KSU" == "true" ]]; then
+    if [[ -f "vendor/kernelsu.config" ]]; then
+        msg "KernelSU enabled: adding vendor/kernelsu.config"
+        FRAGMENTS+=("vendor/kernelsu.config")
+    else
+        msg "WARNING: vendor/kernelsu.config not found, KernelSU fragment skipped."
+    fi
+fi
+
+if [[ "$APPLY_WORKAROUND" == "true" ]]; then
+    mkdir -p "$OUT_DIR"
+    THERMAL_DISABLE_CONFIG="$OUT_DIR/disable-thermal.config"
+    cat > "$THERMAL_DISABLE_CONFIG" << EOF
+# CONFIG_QCOM_SPMI_TEMP_ALARM is not set
+# CONFIG_QTI_ADC_TM is not set
+# CONFIG_QTI_VIRTUAL_SENSOR is not set
+EOF
+    msg "Workaround enabled: adding disable-thermal.config"
+    FRAGMENTS+=("$THERMAL_DISABLE_CONFIG")
+fi
 
 COMMIT_HASH=$(git rev-parse --short HEAD 2>/dev/null || echo "untracked")
 [ -z "$CI_ZIPNAME" ] && ZIPNAME="$DEVICE_TARGET-$(date '+%Y%m%d-%H%M')-$COMMIT_HASH.zip" || ZIPNAME=$CI_ZIPNAME
 BUILD_FLAGS="O=$OUT_DIR ARCH=arm64 -j$(nproc --all)"
 
-# --- Build Process ---
 if [ "$1" = "--regen-defconfig" ]; then
     regen_defconfig
     exit 0
@@ -183,17 +219,21 @@ fi
 
 mkdir -p "$OUT_DIR"
 msg "Starting compilation for $DEVICE_TARGET..."
-make $BUILD_FLAGS $DEFCONFIG
+
+merge_kernel_configs "$BASE_DEFCONFIG" "${FRAGMENTS[@]}"
+
+make $BUILD_FLAGS olddefconfig
+
+msg "Building kernel..."
 make $BUILD_FLAGS | tee -a $COMP_LOG
 
-# --- Packaging & Upload ---
 if [ -f "$OUT_DIR/arch/arm64/boot/Image.gz" ]; then
     msg "Kernel compiled successfully! Packaging..."
     rm -rf AnyKernel3
     git clone -q https://github.com/anggitmrt87/AnyKernel3.git --single-branch -b "master"
     cp "$OUT_DIR/arch/arm64/boot/Image.gz" AnyKernel3/
-    cp "$OUT_DIR/arch/arm64/boot/dts/vendor/qcom/bengal.dtb" AnyKernel3/dtb
-    cp "$OUT_DIR/arch/arm64/boot/dtbo.img" AnyKernel3/
+    cp "$OUT_DIR/arch/arm64/boot/dts/vendor/qcom/bengal.dtb" AnyKernel3/dtb 2>/dev/null || true
+    cp "$OUT_DIR/arch/arm64/boot/dtbo.img" AnyKernel3/ 2>/dev/null || true
 
     cd AnyKernel3
     zip -r9 "../$ZIPNAME" * -x '.git*' README.md '*placeholder'
@@ -201,7 +241,6 @@ if [ -f "$OUT_DIR/arch/arm64/boot/Image.gz" ]; then
 
     MD5_CHECK=$(md5sum "$ZIPNAME" | cut -d' ' -f1)
 
-    # Trigger Telegram Upload
     send_telegram "$(pwd)/$ZIPNAME" "$MD5_CHECK" "$SECONDS" "success" "$__CC"
 
     [ "$DO_CLEAN" = "true" ] && rm -rf AnyKernel3 "$OUT_DIR/arch/arm64/boot"

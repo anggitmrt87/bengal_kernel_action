@@ -16,9 +16,9 @@ on:
         required: true
       DEVICE_TARGET:
         description: 'Device to build'
-        default: 'bengal-perf'
+        default: 'chime'
         type: choice
-        options: [bengal-perf, bengal-stock]
+        options: [chime, lime, citrus]
       KSU:
         description: 'Add KernelSU support'
         type: boolean
@@ -90,7 +90,6 @@ jobs:
         CODENAME=$(cat ../codename)
 
         if [[ "${{ inputs.BUILD_RELEASE }}" = "false" ]]; then
-          #[ -d $(pwd)/localversion ] && sed -i "s/-Perlica/-Perlica-Nightly@$gitsha1/g" $(pwd)/localversion
           echo "buildDetails=$CODENAME-${{ github.event.inputs.DEVICE_TARGET }}-$(date +%Y%m%d)_$(echo $gitsha1)-NIGHTLY" >> $GITHUB_OUTPUT
         else
           echo "buildDetails=$CODENAME-${{ github.event.inputs.DEVICE_TARGET }}-$(date +%Y%m%d)_$(echo $gitsha1)" >> $GITHUB_OUTPUT
@@ -136,7 +135,6 @@ jobs:
         if [ ! -d ~/.ccache ]; then
           mkdir -p ~/.ccache
         fi
-        # Handle KernelSU
         if [[ "$KSU" == "true" ]]; then
           curl -LSs "https://raw.githubusercontent.com/rsuntk/KernelSU/main/kernel/setup.sh" | bash -s ${{ inputs.KSU_BRANCH }}
         fi
