@@ -10,6 +10,9 @@ TC_DIR="$HOME/clang-22"
 OUT_DIR="$(pwd)/out"
 COMP_LOG="$OUT_DIR/compilation.log"
 KCFLAGS_W=${KCFLAGS_W:-"false"}
+CCACHE_DIR="${HOME}/.ccache"
+CCACHE_SIZE=${CCACHE_SIZE:-"5G"}
+CLEAN_BUILD=${CLEAN_BUILD:-"false"}
 
 export TERM=xterm
 red='\033[0;31m'
@@ -92,8 +95,9 @@ setup_deps() {
 }
 
 _setup_toolchain() {
-    msg "Downloading AOSP-LLVM 22.0.1..."
-    wget -q https://android.googlesource.com/platform/prebuilts/clang/host/linux-x86/+archive/9b144befdfd93b90e02c663504fb9f4b95f9faf8/clang-r596125.tar.gz -O /tmp/clang.tar.gz
+    local url="${TOOLCHAIN_URL:-https://android.googlesource.com/platform/prebuilts/clang/host/linux-x86/+archive/9b144befdfd93b90e02c663504fb9f4b95f9faf8/clang-r596125.tar.gz}"
+    msg "Downloading toolchain from $url..."
+    wget -q "$url" -O /tmp/clang.tar.gz
     [ ! -d "$TC_DIR" ] && mkdir -p "$TC_DIR"
     tar -xzf /tmp/clang.tar.gz -C "$TC_DIR"
     rm /tmp/clang.tar.gz
@@ -103,28 +107,75 @@ _setup_toolchain() {
 setup_toolchain() {
     if [ "$UPDATE_TOOLCHAINS" = "true" ]; then
         msg "Cleaning up old toolchains cache.."
-        rm -rf $TC_DIR
-        if [ -d ~/.ccache ]; then
-            rm -rf ~/.ccache
-            mkdir -p ~/.ccache
-        fi
+        rm -rf "$TC_DIR"
+        rm -rf "$CCACHE_DIR"
+        mkdir -p "$CCACHE_DIR"
     fi
     if [ ! -d "$TC_DIR" ]; then
         _setup_toolchain
     else
-        msg "Toolchain already exist"
+        msg "Toolchain already exists"
     fi
     exit 0
 }
 
 regen_defconfig() {
-    [ -z "$DEVICE_TARGET" ] && error "DEVICE_TARGET is required to regen!"
-    mkdir -p "$OUT_DIR"
     msg "Generating minimal defconfig for $DEVICE_TARGET..."
-    make $BUILD_FLAGS "$DEFCONFIG"
+    # Prepare merged config first
+    prepare_config
     make $BUILD_FLAGS savedefconfig
-    msg "Done!"
+    cp "$OUT_DIR/defconfig" "$OUT_DIR/${DEVICE_TARGET}_defconfig"
+    msg "Defconfig saved to $OUT_DIR/${DEVICE_TARGET}_defconfig"
 }
+
+prepare_config() {
+    # Determine base defconfig and fragments based on DEVICE_TARGET
+    local base_defconfig=""
+    local fragments=()
+
+    case "$DEVICE_TARGET" in
+        bengal-perf|bengal-stock)
+            base_defconfig="vendor/${DEVICE_TARGET}_defconfig"
+            ;;
+        chime|lime|citrus)
+            base_defconfig="vendor/bengal-perf_defconfig"
+            fragments+=("arch/arm64/configs/vendor/xiaomi/chime.config")
+            [[ "$DEVICE_TARGET" == "lime" ]] && fragments+=("arch/arm64/configs/vendor/xiaomi/lime.config")
+            [[ "$DEVICE_TARGET" == "citrus" ]] && fragments+=("arch/arm64/configs/vendor/xiaomi/citrus.config")
+            ;;
+        *)
+            error "Unsupported DEVICE_TARGET: $DEVICE_TARGET"
+            ;;
+    esac
+
+    # KernelSU
+    if [[ "$KSU" == "true" ]]; then
+        if [[ -f "arch/arm64/configs/vendor/kernelsu.config" ]]; then
+            msg "KernelSU enable"
+            fragments+=("arch/arm64/configs/vendor/kernelsu.config")
+        else
+            msg "WARNING: kernelsu.config not found, KernelSU fragment skipped."
+        fi
+    fi
+
+    # Workaround (disable thermal)
+    if [[ "$APPLY_WORKAROUND" == "true" ]]; then
+        local therm_disable="$OUT_DIR/disable-thermal.config"
+        mkdir -p "$OUT_DIR"
+        cat > "$therm_disable" << EOF
+# CONFIG_QCOM_SPMI_TEMP_ALARM is not set
+# CONFIG_QTI_ADC_TM is not set
+# CONFIG_QTI_VIRTUAL_SENSOR is not set
+EOF
+        msg "Workaround enabled: adding disable-thermal.config"
+        fragments+=("$therm_disable")
+    fi
+
+    merge_kernel_configs "$base_defconfig" "${fragments[@]}"
+    make $BUILD_FLAGS olddefconfig
+}
+
+# ------------------- Main -------------------
 
 case "$1" in
 "--setup-deps")
@@ -141,11 +192,18 @@ case "$1" in
     make clean mrproper
     exit 0
     ;;
+"--regen-defconfig")
+    # We'll handle below
+    ;;
+*)
+    # Normal build
+    ;;
 esac
 
-VALID_DEVICES=("chime" "lime" "citrus")
+# Validate device
+VALID_DEVICES=("chime" "lime" "citrus" "bengal-perf" "bengal-stock")
 if [[ ! " ${VALID_DEVICES[@]} " =~ " ${DEVICE_TARGET} " ]]; then
-    error "Invalid DEVICE_TARGET='$DEVICE_TARGET'. Valid: chime, lime, citrus"
+    error "Invalid DEVICE_TARGET='$DEVICE_TARGET'. Valid: ${VALID_DEVICES[*]}"
 fi
 
 export KBUILD_BUILD_USER=$USER
@@ -165,64 +223,44 @@ fi
 
 [ "$KCFLAGS_W" = "true" ] && export KCFLAGS=-w
 
-BASE_DEFCONFIG="vendor/bengal-perf_defconfig"
-DEFCONFIG="$BASE_DEFCONFIG"
-
-FRAGMENTS=()
-
-case "$DEVICE_TARGET" in
-    chime)
-        FRAGMENTS+=("arch/arm64/configs/vendor/xiaomi/chime.config")
-        ;;
-    lime)
-        FRAGMENTS+=("arch/arm64/configs/vendor/xiaomi/chime.config")
-        FRAGMENTS+=("arch/arm64/configs/vendor/xiaomi/lime.config")
-        ;;
-    citrus)
-        FRAGMENTS+=("arch/arm64/configs/vendor/xiaomi/chime.config")
-        FRAGMENTS+=("arch/arm64/configs/vendor/xiaomi/citrus.config")
-        ;;
-esac
-
-if [[ "$KSU" == "true" ]]; then
-    if [[ -f "arch/arm64/configs/vendor/kernelsu.config" ]]; then
-        msg "KernelSU enable"
-        FRAGMENTS+=("arch/arm64/configs/vendor/kernelsu.config")
-    else
-        msg "WARNING: kernelsu.config not found, KernelSU fragment skipped."
-    fi
-fi
-
-if [[ "$APPLY_WORKAROUND" == "true" ]]; then
-    mkdir -p "$OUT_DIR"
-    THERMAL_DISABLE_CONFIG="$OUT_DIR/disable-thermal.config"
-    cat > "$THERMAL_DISABLE_CONFIG" << EOF
-# CONFIG_QCOM_SPMI_TEMP_ALARM is not set
-# CONFIG_QTI_ADC_TM is not set
-# CONFIG_QTI_VIRTUAL_SENSOR is not set
-EOF
-    msg "Workaround enabled: adding disable-thermal.config"
-    FRAGMENTS+=("$THERMAL_DISABLE_CONFIG")
-fi
-
 COMMIT_HASH=$(git rev-parse --short HEAD 2>/dev/null || echo "untracked")
 [ -z "$CI_ZIPNAME" ] && ZIPNAME="$DEVICE_TARGET-$(date '+%Y%m%d-%H%M')-$COMMIT_HASH.zip" || ZIPNAME=$CI_ZIPNAME
 BUILD_FLAGS="O=$OUT_DIR ARCH=arm64 -j$(nproc --all)"
 
+# If regen, do it and exit
 if [ "$1" = "--regen-defconfig" ]; then
+    mkdir -p "$OUT_DIR"
+    prepare_config
     regen_defconfig
     exit 0
 fi
 
+# Normal build flow
 mkdir -p "$OUT_DIR"
+
+if [ "$CLEAN_BUILD" = "true" ]; then
+    msg "Cleaning output directory..."
+    rm -rf "$OUT_DIR"
+    mkdir -p "$OUT_DIR"
+fi
+
+# Setup ccache
+export CCACHE_DIR="$CCACHE_DIR"
+ccache -M "$CCACHE_SIZE"
+export CCACHE_SLOPPINESS="time_macros"
+
 msg "Starting compilation for $DEVICE_TARGET..."
 
-merge_kernel_configs "$BASE_DEFCONFIG" "${FRAGMENTS[@]}"
-
-make $BUILD_FLAGS olddefconfig
+prepare_config
 
 msg "Building kernel..."
-make $BUILD_FLAGS | tee -a $COMP_LOG
+make $BUILD_FLAGS 2>&1 | tee -a "$COMP_LOG"
+# Check build success
+if [ ${PIPESTATUS[0]} -ne 0 ]; then
+    error "Compilation failed!"
+    send_telegram "$COMP_LOG" "$(md5sum $COMP_LOG | cut -d' ' -f1)" "$SECONDS" "failed" "$__CC"
+    exit 1
+fi
 
 if [ -f "$OUT_DIR/arch/arm64/boot/Image.gz" ]; then
     msg "Kernel compiled successfully! Packaging..."
@@ -247,4 +285,5 @@ if [ -f "$OUT_DIR/arch/arm64/boot/Image.gz" ]; then
 else
     error "Compilation failed!"
     send_telegram "$COMP_LOG" "$(md5sum $COMP_LOG | cut -d' ' -f1)" "$SECONDS" "failed" "$__CC"
+    exit 1
 fi

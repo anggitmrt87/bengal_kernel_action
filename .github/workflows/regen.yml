@@ -10,16 +10,13 @@ on:
         description: 'Kernel repository branch'
         default: '13.0.0-perf'
         required: true
+      toolchain_url:
+        description: 'Custom Clang toolchain URL (optional)'
+        required: false
+        default: ''
 
 jobs:
-  fetch:
-    runs-on: ubuntu-latest
-    steps:      
-    - name: Fetch Toolchains
-      run: wget -q https://android.googlesource.com/platform/prebuilts/clang/host/linux-x86/+archive/105aba85d97a53d364585ca755752dae054b49e8/clang-r584948b.tar.gz -O /tmp/clang.tar.gz && mkdir ~/clang && tar -xf /tmp/clang.tar.gz -C ~/clang
-
   build:
-    needs: fetch
     strategy:
       matrix:
         include:
@@ -30,3 +27,4 @@ jobs:
       repo: ${{ inputs.repo }}
       branch: ${{ inputs.branch }}
       device: ${{ matrix.device }}
+      toolchain_url: ${{ inputs.toolchain_url }}
